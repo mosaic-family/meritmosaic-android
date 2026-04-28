@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: [self-hosted, Linux, X64, android-build]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Notify Matrix - Workflow started
+        if: always()
+        run: |
+          PAYLOAD="{\"text\":\"🤖 katafract-io/meritmosaic-android release run #${{ github.run_number }} started (ref ${{ github.ref_name }}) on ${{ runner.name }}\"}"
+          curl -s -X POST https://webhooks.katafract.io/webhook/ci \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.MATRIX_WEBHOOK_SECRET }}" \
+            -d "$PAYLOAD" || true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Fetch secrets from Infisical
+        env:
+          INFISICAL_CLIENT_ID:     ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        run: |
+          set -e
+          TOKEN=$(curl -sS --fail -X POST https://secrets.katafract.io/api/v1/auth/universal-auth/login \
+            -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"$INFISICAL_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CLIENT_SECRET\"}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+          # Fetch the entire /android folder + root in one shot — by-name lookups have a bug for some keys
+          # (see project_infisical_full_redundancy_2026_04_28.md).
+          curl -sS --fail \
+            "https://secrets.katafract.io/api/v3/secrets/raw?workspaceId=f51b990a-63ba-4ce0-a388-cb9aadc42383&environment=prod&secretPath=/android" \
+            -H "Authorization: Bearer $TOKEN" > /tmp/android_secrets.json
+          curl -sS --fail \
+            "https://secrets.katafract.io/api/v3/secrets/raw?workspaceId=f51b990a-63ba-4ce0-a388-cb9aadc42383&environment=prod&secretPath=/" \
+            -H "Authorization: Bearer $TOKEN" > /tmp/root_secrets.json
+          getval() { python3 -c "import json,sys; [print(s['secretValue']) for s in json.load(open('$1'))['secrets'] if s['secretKey']=='$2']"; }
+          getval /tmp/android_secrets.json MERITMOSAIC_ANDROID_KEYSTORE_B64      > /tmp/ks.b64
+          getval /tmp/android_secrets.json MERITMOSAIC_ANDROID_KEYSTORE_PASSWORD > /tmp/ks_pass.txt
+          getval /tmp/android_secrets.json MERITMOSAIC_ANDROID_KEY_ALIAS         > /tmp/key_alias.txt
+          cp /tmp/ks_pass.txt /tmp/key_pass.txt  # PKCS12 forces key_pwd == store_pwd; never fetch KEY_PASSWORD separately (drift risk)
+          getval /tmp/root_secrets.json    PLAY_SERVICE_ACCOUNT_KEY               > /tmp/play_sa.json
+          rm -f /tmp/android_secrets.json /tmp/root_secrets.json
+          # Verify all files have content
+          for f in /tmp/ks.b64 /tmp/ks_pass.txt /tmp/key_alias.txt /tmp/key_pass.txt /tmp/play_sa.json; do
+            if [ ! -s "$f" ]; then echo "ERROR: $f is empty"; exit 1; fi
+          done
+
+      - name: Decode keystore
+        run: |
+          mkdir -p keystore
+          base64 -d /tmp/ks.b64 > keystore/meritmosaic-release.p12
+
+      - name: Build release AAB
+        run: |
+          export KEYSTORE_PASSWORD=$(cat /tmp/ks_pass.txt)
+          export KEY_ALIAS=$(cat /tmp/key_alias.txt)
+          export KEY_PASSWORD=$(cat /tmp/key_pass.txt)
+          ./gradlew bundleRelease --no-daemon -PversionCode=${{ github.run_number }}
+
+      - name: Notify Matrix - AAB build succeeded
+        if: success()
+        run: |
+          PAYLOAD="{\"text\":\"📦 katafract-io/meritmosaic-android AAB built (versionCode ${{ github.run_number }})\"}"
+          curl -s -X POST https://webhooks.katafract.io/webhook/ci \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.MATRIX_WEBHOOK_SECRET }}" \
+            -d "$PAYLOAD" || true
+
+      - name: Notify Matrix - AAB build FAILED
+        if: failure()
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD="{\"text\":\"🔴 katafract-io/meritmosaic-android AAB build FAILED — $RUN_URL\"}"
+          for ROOM in ci alerts; do
+            curl -s -X POST "https://webhooks.katafract.io/webhook/$ROOM" \
+              -H "Content-Type: application/json" \
+              -H "X-Webhook-Secret: ${{ secrets.MATRIX_WEBHOOK_SECRET }}" \
+              -d "$PAYLOAD" || true
+          done
+
+      - name: Upload to Play — internal track
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: /tmp/play_sa.json
+          packageName:        com.katafract.meritmosaic
+          releaseFiles:       app/build/outputs/bundle/release/*.aab
+          track:              internal
+          status:             draft
+
+      - name: Notify Matrix - Play upload succeeded
+        if: success()
+        run: |
+          PAYLOAD="{\"text\":\"🚀 katafract-io/meritmosaic-android v${{ github.ref_name }} uploaded to Play internal track\"}"
+          curl -s -X POST https://webhooks.katafract.io/webhook/deploys \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.MATRIX_WEBHOOK_SECRET }}" \
+            -d "$PAYLOAD" || true
+
+      - name: Notify Matrix - Play upload FAILED
+        if: failure()
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD="{\"text\":\"⚠️ katafract-io/meritmosaic-android Play Console upload FAILED — $RUN_URL\"}"
+          for ROOM in deploys alerts; do
+            curl -s -X POST "https://webhooks.katafract.io/webhook/$ROOM" \
+              -H "Content-Type: application/json" \
+              -H "X-Webhook-Secret: ${{ secrets.MATRIX_WEBHOOK_SECRET }}" \
+              -d "$PAYLOAD" || true
+          done
+
+      - name: Clean up secrets
+        if: always()
+        run: rm -f keystore/meritmosaic-release.p12 /tmp/ks.b64 /tmp/ks_pass.txt /tmp/key_alias.txt /tmp/key_pass.txt /tmp/play_sa.json
