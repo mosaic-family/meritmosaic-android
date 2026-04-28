@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: [self-hosted, Linux, X64, android-build]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Fetch secrets from Infisical
+        env:
+          INFISICAL_CLIENT_ID:     ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+        run: |
+          TOKEN=$(curl -sS --fail -X POST https://secrets.katafract.io/api/v1/auth/universal-auth/login \
+            -H "Content-Type: application/json" \
+            -d "{\"clientId\":\"$INFISICAL_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_CLIENT_SECRET\"}" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+
+          fetch() {
+            curl -sS --fail \
+              "https://secrets.katafract.io/api/v3/secrets/raw/$1?environment=prod&secretPath=$2" \
+              -H "Authorization: Bearer $TOKEN" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["secret"]["secretValue"])'
+          }
+          # Per `reference_android_keystores.md` — meritmosaic Infisical paths.
+          fetch MERITMOSAIC_ANDROID_KEYSTORE_B64      /android > /tmp/ks.b64
+          fetch MERITMOSAIC_ANDROID_KEYSTORE_PASSWORD /android > /tmp/ks_pass.txt
+          fetch MERITMOSAIC_ANDROID_KEY_ALIAS         /android > /tmp/key_alias.txt
+          fetch MERITMOSAIC_ANDROID_KEY_PASSWORD      /android > /tmp/key_pass.txt
+          fetch PLAY_SERVICE_ACCOUNT_KEY              /        > /tmp/play_sa.json
+
+      - name: Decode keystore
+        run: |
+          mkdir -p keystore
+          base64 -d /tmp/ks.b64 > keystore/meritmosaic-release.p12
+
+      - name: Build release AAB
+        run: |
+          export KEYSTORE_PASSWORD=$(cat /tmp/ks_pass.txt)
+          export KEY_ALIAS=$(cat /tmp/key_alias.txt)
+          export KEY_PASSWORD=$(cat /tmp/key_pass.txt)
+          ./gradlew bundleRelease --no-daemon -PversionCode=${{ github.run_number }}
+
+      - name: Upload to Play — internal track
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJson: /tmp/play_sa.json
+          packageName:        com.katafract.meritmosaic
+          releaseFiles:       app/build/outputs/bundle/release/*.aab
+          track:              internal
+          status:             draft
+
+      - name: Clean up secrets
+        if: always()
+        run: rm -f keystore/meritmosaic-release.p12 /tmp/ks.b64 /tmp/ks_pass.txt /tmp/key_alias.txt /tmp/key_pass.txt /tmp/play_sa.json
