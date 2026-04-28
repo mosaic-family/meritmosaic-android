@@ -17,9 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -97,21 +95,30 @@ fun CreditStoreScreen(
             item { EarnFreeCallout() }
             item { Text("Credit Packs", style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold) }
-            item {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement   = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.height(420.dp),
-                    userScrollEnabled = false
+            // Pack grid is 2 columns × N rows. Originally a LazyVerticalGrid with
+            // a fixed Modifier.height(420.dp), but a fixed height inside a LazyColumn
+            // clips on small screens / dynamic-text users when packs taller than the
+            // height add up. Switched to a Column-of-chunked-Rows so each row
+            // grows to fit its tallest card and the LazyColumn handles overall scroll.
+            items(packs.chunked(2)) { rowPacks ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(packs) { pack ->
-                        PackCard(
-                            pack = pack,
-                            inProgress = purchaseInProgress == pack.productId,
-                            disabled   = purchaseInProgress != null,
-                            onPurchase = { viewModel.purchase(pack.productId) }
-                        )
+                    rowPacks.forEach { pack ->
+                        Box(modifier = Modifier.weight(1f)) {
+                            PackCard(
+                                pack = pack,
+                                inProgress = purchaseInProgress == pack.productId,
+                                disabled   = purchaseInProgress != null,
+                                onPurchase = { viewModel.purchase(pack.productId) }
+                            )
+                        }
+                    }
+                    // If odd-count last row, pad the empty cell so the remaining
+                    // card doesn't stretch the full width.
+                    if (rowPacks.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }

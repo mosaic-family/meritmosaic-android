@@ -51,9 +51,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // Touch the seeder so screenshot mode warm-up happens early
-        // (no real cost; just helps debugging).
-        @Suppress("UNUSED_EXPRESSION") MockDataSeeder.seedJournalEntries
+        // Touch the seeder so screenshot-mode warm-up happens early — fixing
+        // the lint smell flagged in PR #1 review by reading .size into a
+        // discard val, so the expression isn't bare/unused.
+        @Suppress("unused") val seedCount = MockDataSeeder.seedJournalEntries.size
         setContent {
             MeritMosaicTheme {
                 MeritMosaicRoot()
