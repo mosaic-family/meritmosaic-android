@@ -100,6 +100,10 @@ dependencies {
     implementation(libs.core.ktx)
     implementation(libs.appcompat)
     implementation(libs.constraintlayout)
+    // Material Components — needed for Theme.Material3.DayNight.* XML parent
+    // referenced by app/src/main/res/values/themes.xml. Without this AAPT2
+    // can't resolve the parent style and the build fails at processReleaseResources.
+    implementation(libs.material)
 
     // Room (local cache)
     implementation(libs.room.runtime)
