@@ -1,0 +1,25 @@
+# Build
+.gradle/
+build/
+app/build/
+local.properties
+
+# Keystores (deployed via Infisical at CI time)
+keystore/
+*.jks
+*.p12
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+
+# Tooling
+captures/
+.cxx/
