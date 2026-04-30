@@ -18,6 +18,7 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["useTestStorageService"] = "true"
         vectorDrawables { useSupportLibrary = true }
 
         // SCREENSHOT_MODE flag — when true, MockDataSeeder seeds the
@@ -88,6 +89,13 @@ dependencies {
     implementation(libs.compose.runtime)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.navigation.compose)
+    // Screenshots pipeline (chronos-androidbuilder → Play Console)
+    androidTestImplementation("androidx.test:rules:1.5.0")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("androidx.test.services:storage:1.5.0")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestUtil("androidx.test.services:test-services:1.5.0")
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
 
