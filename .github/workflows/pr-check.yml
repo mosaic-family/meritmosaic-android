@@ -1,0 +1,31 @@
+name: PR check (compile gate)
+
+# FAST compile gate. Runs on the PR head via `pull_request`. Its ONLY job is to
+# validate that the Gradle build configuration parses (the fast analog of a compile)
+# so the base-branch-controlled "Adversarial review" workflow_run trigger fires.
+# It deliberately does NOT run a full assemble or execute any app logic.
+
+on:
+  pull_request:
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Android compile (compile gate)
+    runs-on: [self-hosted, Linux, X64, android-build]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+
+      - name: Validate Gradle build configuration parses
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew help
